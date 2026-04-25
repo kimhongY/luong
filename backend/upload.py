@@ -18,11 +18,14 @@ class ImageUploader:
         try:
             folder = f"mini-shop/products/{product_id}" if product_id else "mini-shop/products"
             result = cloudinary.uploader.upload(
-                file, folder=folder,
-                transformation=[{'width': 500, 'height': 500, 'crop': 'fill'}, {'quality': 'auto', 'fetch_format': 'auto'}],
+                file,
+                folder=folder,
                 resource_type="auto"
             )
-            return {'url': result['secure_url'], 'public_id': result['public_id']}
+            return {
+                'url': result['secure_url'],
+                'public_id': result['public_id']
+            }
         except Exception as e:
             print(f"Upload failed: {e}")
             return None
