@@ -1,3 +1,21 @@
+import sys
+import os
+
+# បន្ថែមថត backend ទៅ Python Path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+import json
+from dotenv import load_dotenv
+from telegram import Update, LabeledPrice, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler, CallbackQueryHandler
+from models import get_db, Order, OrderStatus, Voucher
+from notifications import NotificationService
+from inventory import InventoryManager
+from datetime import datetime
+
+load_dotenv()
+
+# ... កូដដែលនៅសល់ដូចដើ
 import json
 import os
 from dotenv import load_dotenv
