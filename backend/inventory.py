@@ -1,3 +1,10 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from models import get_db, Product
+
+# ... កូដដែលនៅសល់ដូចដើម
 from models import get_db, Product
 
 class InventoryManager:
