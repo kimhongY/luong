@@ -1,3 +1,18 @@
+import sys
+import os
+
+# បន្ថែមថត backend ទៅ Python Path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from models import get_db, Product, Order, Voucher, Review, OrderStatus
+from inventory import InventoryManager
+from upload import ImageUploader
+from sqlalchemy import func
+import base64
+
+# ... កូដដែលនៅសល់ដូចដើម
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from models import get_db, Product, Order, Voucher, Review, OrderStatus
