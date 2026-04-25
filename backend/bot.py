@@ -1,23 +1,13 @@
 import sys
 import os
 
-# បន្ថែមថត backend ទៅ Python Path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# បន្ថែមថតបច្ចុប្បន្ន (backend) ទៅក្នុង sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
+# ឥឡូវនេះ Python អាចរកឃើញ models, notifications, inventory
 import json
-from dotenv import load_dotenv
-from telegram import Update, LabeledPrice, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler, CallbackQueryHandler
-from models import get_db, Order, OrderStatus, Voucher
-from notifications import NotificationService
-from inventory import InventoryManager
-from datetime import datetime
-
-load_dotenv()
-
-# ... កូដដែលនៅសល់ដូចដើ
-import json
-import os
 from dotenv import load_dotenv
 from telegram import Update, LabeledPrice, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler, CallbackQueryHandler
@@ -30,7 +20,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv('8670790936:AAGrR4VaeKXIrB5fTE8vb5LUPSw2oU6keqk')
 ADMIN_USER_ID = int(os.getenv('661892014', 0))
-WEBAPP_URL = os.getenv('WEBAPP_URL', 'https://example.com')
+WEBAPP_URL = os.getenv('WEBAPP_URL', 'https://kimhongy.github.io/luong/')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
