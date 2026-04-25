@@ -102,8 +102,9 @@ def upload_image():
     data = request.json
     image_data = data.get('image')
     if not image_data: return jsonify({'error': 'No image'}), 400
-    image_bytes = base64.b64decode(image_data.split(',')[1] if ',' in image_data else image_data)
-    result = ImageUploader.upload_product_image(image_bytes, data.get('product_id'))
+    
+    # ឥឡូវយើងផ្ញើ image_data ដោយផ្ទាល់ (ជា Base64 string)
+    result = ImageUploader.upload_product_image(image_data, data.get('product_id'))
     if result:
         if data.get('product_id'):
             db = next(get_db())
