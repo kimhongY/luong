@@ -15,7 +15,7 @@ import enum
 BOT_TOKEN = "8670790936:AAGrR4VaeKXIrB5fTE8vb5LUPSw2oU6keqk"  # សូមរក្សាទុកជាសម្ងាត់
 ADMIN_USER_ID = 661892014
 WEBAPP_URL = "https://kimhongy.github.io/luong/"
-DATABASE_URL = "sqlite:///shop.db"
+DATABASE_URL = "sqlite:////tmp/shop.db"
 
 # ========== Database Setup ==========
 engine = create_engine(DATABASE_URL)
