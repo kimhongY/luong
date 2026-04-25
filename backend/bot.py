@@ -1,8 +1,8 @@
 import sys
 import os
 import json
-import base64
 from datetime import datetime
+from flask import Flask, request, Response
 from dotenv import load_dotenv
 from telegram import Update, LabeledPrice, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler, CallbackQueryHandler
@@ -11,25 +11,24 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import enum
 
-# ========== តម្លៃដោយផ្ទាល់ (ជំនួស Environment Variables) ==========
-BOT_TOKEN = "8670790936:AAGrR4VaeKXIrB5fTE8vb5LUPSw2oU6keqk"  # សូមរក្សាទុកជាសម្ងាត់
+# ========== Hardcoded settings (អាចប្តូរពេលក្រោយ) ==========
+BOT_TOKEN = "8670790936:AAGrR4VaeKXIrB5fTE8vb5LUPSw2oU6keqk"
 ADMIN_USER_ID = 661892014
 WEBAPP_URL = "https://kimhongy.github.io/luong/"
-DATABASE_URL = "sqlite:////tmp/shop.db"
+DATABASE_URL = "sqlite:////tmp/shop.db"  # /tmp/ អាចសរសេរបាននៅលើ Render
 
 # ========== Database Setup ==========
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
-# ========== Enums ==========
+# ========== Enums & Models (ដូចដើម) ==========
 class OrderStatus(enum.Enum):
     PENDING = "pending"
     PAID = "paid"
     CANCELLED = "cancelled"
     DELIVERED = "delivered"
 
-# ========== Database Models ==========
 class Product(Base):
     __tablename__ = 'products'
     id = Column(Integer, primary_key=True)
@@ -133,7 +132,7 @@ class NotificationService:
         msg = messages.get(new_status, f'Order #{order.id} status: {new_status}')
         await NotificationService.send_notification(context=context, user_id=order.user_id, title=f'Order #{order.id}', message=msg, ntype='order_update')
 
-# ========== Bot Handlers ==========
+# ========== Bot Handlers (ដូចដើម) ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))],
@@ -225,16 +224,51 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("🛍️ *Commands*\n/start - Open shop\n/admin - Admin panel\n\n*Payment*: Telegram Stars", parse_mode='Markdown')
 
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("admin", admin_command))
-    app.add_handler(CallbackQueryHandler(help_callback, pattern="help"))
-    app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data))
-    app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
-    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
-    print("Bot is running...")
-    app.run_polling()
+# ========== Flask App with Webhook ==========
+app = Flask(__name__)
+
+# បង្កើត PTB Application
+ptb_app = Application.builder().token(BOT_TOKEN).build()
+ptb_app.add_handler(CommandHandler("start", start))
+ptb_app.add_handler(CommandHandler("admin", admin_command))
+ptb_app.add_handler(CallbackQueryHandler(help_callback, pattern="help"))
+ptb_app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data))
+ptb_app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
+ptb_app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
+
+@app.route('/')
+def health_check():
+    """សម្រាប់ Render Health Check"""
+    return Response('OK', status=200)
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """ទទួល Webhook ពី Telegram"""
+    if request.method == 'POST':
+        update = Update.de_json(request.get_json(force=True), ptb_app.bot)
+        # ដំណើរការ update តាមរយៈ application
+        ptb_app.update_queue.put_nowait(update)
+    return Response('ok', status=200)
+
+# ========== Startup ==========
+def set_webhook():
+    """កំណត់ Webhook URL ទៅ Telegram"""
+    # ប្រើ Render external URL បើមាន បើមិនអញ្ចឹងសួរអ្នកប្រើ
+    render_url = os.environ.get('RENDER_EXTERNAL_URL')
+    if render_url:
+        webhook_url = f"{render_url}/webhook"
+    else:
+        # កំឡុងពេលអភិវឌ្ឍន៍ អ្នកអាច hardcode ឬប្រើ ngrok
+        webhook_url = "https://your-service.onrender.com/webhook"  # ប្តូរក្រោយ
+    
+    # លុប webhook ចាស់ចោល រួចកំណត់ថ្មី
+    ptb_app.bot.delete_webhook()
+    ptb_app.bot.set_webhook(url=webhook_url)
+    print(f"Webhook set to: {webhook_url}")
 
 if __name__ == '__main__':
-    main()
+    # កំណត់ webhook មុនចាប់ផ្តើម server
+    set_webhook()
+    # ចាប់ផ្តើម Flask server លើ port ដែល Render ផ្តល់ឲ្យ (default 10000)
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False)
