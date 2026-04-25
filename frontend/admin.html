@@ -75,13 +75,31 @@
                 <div class="card"><h3>បញ្ជីទំនិញ</h3>${products.map(p=>`<div class="list-item"><strong>${p.name}</strong> - $${p.price} (${p.stars_price}⭐) - ស្តុក: ${p.stock} <button class="btn btn-danger" style="float:right" onclick="deleteProduct(${p.id})">លុប</button></div>`).join('')}</div>`;
         }
         
-        async function addProduct(e){
-            e.preventDefault();
-            const product={name:document.getElementById('p-name').value,description:document.getElementById('p-desc').value,price:parseFloat(document.getElementById('p-price').value),stars_price:parseInt(document.getElementById('p-stars').value),image_url:document.getElementById('p-image').value,stock:parseInt(document.getElementById('p-stock').value),category:document.getElementById('p-category').value};
-            await fetch(API+'/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(product)});
-            alert('✅ បានបន្ថែម!');loadProducts();
-        }
-        
+        async function addProduct(e) {
+    e.preventDefault();
+    
+    // ប្រើ image URL ដោយផ្ទាល់ ឬទុកទទេ
+    const imageUrl = document.getElementById('p-image').value || '';
+    
+    const product = {
+        name: document.getElementById('p-name').value,
+        description: document.getElementById('p-desc').value,
+        price: parseFloat(document.getElementById('p-price').value),
+        stars_price: parseInt(document.getElementById('p-stars').value),
+        image_url: imageUrl,  // ទុកជា URL ធម្មតា ឬទទេ
+        stock: parseInt(document.getElementById('p-stock').value),
+        category: document.getElementById('p-category').value || 'General'
+    };
+    
+    await fetch(API + '/api/products', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(product)
+    });
+    
+    alert('✅ បានបន្ថែម!');
+    loadProducts();
+}
         async function deleteProduct(id){if(confirm('លុប?')){await fetch(API+'/api/products/'+id,{method:'DELETE'});loadProducts();}}
         
         async function loadOrders(){
