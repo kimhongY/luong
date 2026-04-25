@@ -1,34 +1,148 @@
 import sys
 import os
-
-# បន្ថែមថតបច្ចុប្បន្ន (backend) ទៅក្នុង sys.path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
-
-# ឥឡូវនេះ Python អាចរកឃើញ models, notifications, inventory
 import json
+import base64
+from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, LabeledPrice, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, PreCheckoutQueryHandler, CallbackQueryHandler
-from models import get_db, Order, OrderStatus, Voucher
-from notifications import NotificationService
-from inventory import InventoryManager
-from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Enum, func
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import enum
 
-load_dotenv()
+# ========== តម្លៃដោយផ្ទាល់ (ជំនួស Environment Variables) ==========
+BOT_TOKEN = "8670790936:AAGrR4VaeKXIrB5fTE8vb5LUPSw2oU6keqk"  # សូមរក្សាទុកជាសម្ងាត់
+ADMIN_USER_ID = 661892014
+WEBAPP_URL = "https://kimhongy.github.io/luong/"
+DATABASE_URL = "sqlite:///shop.db"
 
-BOT_TOKEN = os.getenv('8670790936:AAGrR4VaeKXIrB5fTE8vb5LUPSw2oU6keqk')
-ADMIN_USER_ID = int(os.getenv('661892014', 0))
-WEBAPP_URL = os.getenv('WEBAPP_URL', 'https://kimhongy.github.io/luong/')
+# ========== Database Setup ==========
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
 
+# ========== Enums ==========
+class OrderStatus(enum.Enum):
+    PENDING = "pending"
+    PAID = "paid"
+    CANCELLED = "cancelled"
+    DELIVERED = "delivered"
+
+# ========== Database Models ==========
+class Product(Base):
+    __tablename__ = 'products'
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    description = Column(String(500))
+    price = Column(Float, nullable=False)
+    stars_price = Column(Integer, nullable=False)
+    image_url = Column(String(500))
+    stock = Column(Integer, default=0)
+    category = Column(String(50))
+    is_active = Column(Integer, default=1)
+    rating = Column(Float, default=0.0)
+    total_reviews = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class Order(Base):
+    __tablename__ = 'orders'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False)
+    username = Column(String(100))
+    first_name = Column(String(100))
+    items = Column(JSON, nullable=False)
+    total_amount = Column(Float, nullable=False)
+    status = Column(Enum(OrderStatus), default=OrderStatus.PENDING)
+    telegram_payment_id = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    paid_at = Column(DateTime)
+
+class Voucher(Base):
+    __tablename__ = 'vouchers'
+    id = Column(Integer, primary_key=True)
+    code = Column(String(20), unique=True, nullable=False)
+    discount_percent = Column(Integer)
+    discount_amount = Column(Float)
+    max_uses = Column(Integer, default=100)
+    current_uses = Column(Integer, default=0)
+    is_active = Column(Integer, default=1)
+
+class Notification(Base):
+    __tablename__ = 'notifications'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False)
+    title = Column(String(200), nullable=False)
+    message = Column(String(1000), nullable=False)
+    type = Column(String(50))
+    is_read = Column(Integer, default=0)
+    related_order_id = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+Base.metadata.create_all(engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# ========== Inventory Manager ==========
+class InventoryManager:
+    @staticmethod
+    def check_stock(product_id, quantity_needed):
+        db = next(get_db())
+        product = db.query(Product).get(product_id)
+        if not product:
+            return {'available': False, 'message': 'Product not found'}
+        if product.stock < quantity_needed:
+            return {'available': False, 'message': f'Only {product.stock} left'}
+        return {'available': True}
+
+    @staticmethod
+    def reserve_stock(order):
+        db = next(get_db())
+        for item in order.items:
+            product = db.query(Product).get(item['id'])
+            if product:
+                product.stock -= item['quantity']
+        db.commit()
+
+# ========== Notification Service ==========
+class NotificationService:
+    @staticmethod
+    async def send_notification(context: ContextTypes.DEFAULT_TYPE, user_id: int, title: str, message: str, ntype: str = "system"):
+        try:
+            db = next(get_db())
+            db.add(Notification(user_id=user_id, title=title, message=message, type=ntype))
+            db.commit()
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📋 View Orders", callback_data="orders")]]) if ntype == "order_update" else None
+            await context.bot.send_message(chat_id=user_id, text=f"🔔 *{title}*\n\n{message}", parse_mode='Markdown', reply_markup=keyboard)
+        except Exception as e:
+            print(f"Notify failed: {e}")
+
+    @staticmethod
+    async def notify_admin(context: ContextTypes.DEFAULT_TYPE, title: str, message: str):
+        if ADMIN_USER_ID:
+            await context.bot.send_message(chat_id=ADMIN_USER_ID, text=f"👑 *{title}*\n\n{message}", parse_mode='Markdown')
+
+    @staticmethod
+    async def notify_order_update(context: ContextTypes.DEFAULT_TYPE, order, old_status, new_status):
+        messages = {'paid': 'Payment received!', 'delivered': 'Order delivered! Thank you!', 'cancelled': 'Order cancelled.'}
+        msg = messages.get(new_status, f'Order #{order.id} status: {new_status}')
+        await NotificationService.send_notification(context=context, user_id=order.user_id, title=f'Order #{order.id}', message=msg, ntype='order_update')
+
+# ========== Bot Handlers ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🛍️ Open Shop", web_app=WebAppInfo(url=WEBAPP_URL))],
-        [InlineKeyboardButton("📊 Dashboard", web_app=WebAppInfo(url=f"{WEBAPP_URL}/dashboard.html")), InlineKeyboardButton("🔍 Search", web_app=WebAppInfo(url=f"{WEBAPP_URL}/search.html"))],
+        [InlineKeyboardButton("📊 Dashboard", web_app=WebAppInfo(url=f"{WEBAPP_URL}/dashboard.html")),
+         InlineKeyboardButton("🔍 Search", web_app=WebAppInfo(url=f"{WEBAPP_URL}/search.html"))],
         [InlineKeyboardButton("ℹ️ Help", callback_data="help")]
     ]
-    await update.message.reply_text("🌟 *Welcome to Mini Shop!*\n\n• Browse products\n• Pay with Telegram Stars\n• Track your orders", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    await update.message.reply_text("🌟 *Welcome to Mini Shop!*\n\n• Browse products\n• Pay with Telegram Stars\n• Track your orders",
+                                    reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = json.loads(update.effective_message.web_app_data.data)
@@ -46,13 +160,15 @@ async def web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
         
         db = next(get_db())
-        order = Order(user_id=user.id, username=user.username, first_name=user.first_name, items=items, total_amount=total_amount)
+        order = Order(user_id=user.id, username=user.username, first_name=user.first_name,
+                      items=items, total_amount=total_amount)
         db.add(order)
         db.commit()
         
         discount = 0
         if voucher_code:
-            voucher = db.query(Voucher).filter(Voucher.code == voucher_code, Voucher.is_active == 1, Voucher.current_uses < Voucher.max_uses).first()
+            voucher = db.query(Voucher).filter(Voucher.code == voucher_code, Voucher.is_active == 1,
+                                               Voucher.current_uses < Voucher.max_uses).first()
             if voucher:
                 discount = (total_amount * voucher.discount_percent / 100) if voucher.discount_percent else (voucher.discount_amount or 0)
                 voucher.current_uses += 1
@@ -68,10 +184,14 @@ async def web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         title = "Mini Shop Order"
         description = "\n".join([f"• {item['name']} x{item['quantity']} - ${item['price'] * item['quantity']:.2f}" for item in items])
-        if discount > 0: description += f"\n\nDiscount: -${discount:.2f}"
+        if discount > 0:
+            description += f"\n\nDiscount: -${discount:.2f}"
         description += f"\n\nTotal: ${total_amount - discount:.2f}"
         
-        await context.bot.send_invoice(chat_id=user.id, title=title, description=description, payload=f"order_{order.id}", provider_token="", currency="XTR", prices=[LabeledPrice("Total", stars_total)], start_parameter="shop_order", need_name=True, need_phone_number=True)
+        await context.bot.send_invoice(chat_id=user.id, title=title, description=description,
+                                       payload=f"order_{order.id}", provider_token="", currency="XTR",
+                                       prices=[LabeledPrice("Total", stars_total)],
+                                       start_parameter="shop_order", need_name=True, need_phone_number=True)
 
 async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.pre_checkout_query.answer(ok=True)
@@ -86,10 +206,12 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
         order.telegram_payment_id = payment.telegram_payment_charge_id
         order.paid_at = datetime.utcnow()
         db.commit()
-        await NotificationService.notify_admin(context=context, title='🎉 New Order!', message=f'Customer: {order.first_name}\nOrder: #{order.id}\nTotal: ${order.total_amount:.2f}')
+        await NotificationService.notify_admin(context=context, title='🎉 New Order!',
+                                               message=f'Customer: {order.first_name}\nOrder: #{order.id}\nTotal: ${order.total_amount:.2f}')
         await NotificationService.notify_order_update(context=context, order=order, old_status='pending', new_status='paid')
         if order.total_amount >= 50:
-            await NotificationService.send_notification(context=context, user_id=order.user_id, title='🎁 Special Offer!', message='Use code THANKYOU10 for 10% off next order!', ntype='promotion')
+            await NotificationService.send_notification(context=context, user_id=order.user_id, title='🎁 Special Offer!',
+                                                        message='Use code THANKYOU10 for 10% off next order!', ntype='promotion')
         await update.effective_message.reply_text(f"✅ *Payment Successful!*\n\nOrder: #{order.id}\nThank you! 🙏", parse_mode='Markdown')
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
